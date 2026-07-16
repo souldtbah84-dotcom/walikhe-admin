@@ -456,7 +456,7 @@ function renderDashboard(){
   document.getElementById('dash-pending').innerHTML = pending.length ? `
     <div class="table-wrap"><table><tbody>
       ${pending.map(p=>`<tr>
-        <td><div class="name-cell"><div class="avatar-sm">${initials(p.nom)}</div><div><div class="cell-name">${p.nom}</div><div class="cell-sub">${p.metier||''} · ${p.zone||''}</div></div></div></td>
+        <td><div class="name-cell"><div class="avatar-sm">${avatarHTML(p)}</div><div><div class="cell-name">${p.nom}</div><div class="cell-sub">${p.metier||''} · ${p.zone||''}</div></div></div></td>
         <td style="text-align:right;"><div class="row-actions" style="justify-content:flex-end;">
           <button class="btn btn-danger btn-sm" onclick="setProStatus(${p.id},'refuse')">Refuser</button>
           <button class="btn btn-success btn-sm" onclick="setProStatus(${p.id},'actif')">Valider</button>
@@ -543,7 +543,7 @@ function renderProsTable(){
   const catLbl = c => (categories.find(x=>x.id===c)||{}).lbl || c || '—';
   document.getElementById('pros-tbody').innerHTML = list.length ? list.map(p=>`
     <tr class="clickable" onclick="openProDrawer(${p.id})">
-      <td><div class="name-cell"><div class="avatar-sm">${initials(p.nom)}</div><div><div class="cell-name">${p.nom} ${p.certifie?'🏅':''}</div><div class="cell-sub">${p.metier||''}</div></div></div></td>
+      <td><div class="name-cell"><div class="avatar-sm">${avatarHTML(p)}</div><div><div class="cell-name">${p.nom} ${p.certifie?'🏅':''}</div><div class="cell-sub">${p.metier||''}</div></div></div></td>
       <td>${catLbl(p.categorie)}</td>
       <td>${p.note>0 ? '★ '+p.note : '—'}</td>
       <td>${p.missions||0}</td>
@@ -719,6 +719,9 @@ async function saveSettings(){
 
 /* ============ UTILITAIRES ============ */
 function initials(name){ return (name||'?').split(' ').map(w=>w[0]).join('').slice(0,2).toUpperCase(); }
+function avatarHTML(p){
+  return p.photo ? `<img src="${p.photo}" alt="${p.nom}" style="width:100%;height:100%;object-fit:cover;border-radius:50%;">` : initials(p.nom);
+}
 function openDrawer(){ document.getElementById('drawer').classList.add('show'); document.getElementById('drawer-overlay').classList.add('show'); }
 function closeDrawer(){ document.getElementById('drawer').classList.remove('show'); document.getElementById('drawer-overlay').classList.remove('show'); }
 
