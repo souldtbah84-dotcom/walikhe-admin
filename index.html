@@ -218,7 +218,8 @@ let users = [];
 let pros = [];
 let bookings = [];
 let reviews = [];
-let categories = [
+let categories = [];
+const DEMO_CATEGORIES = [
   {id:'elec', ic:'⚡', lbl:'Électricité'},
   {id:'plomb', ic:'🔧', lbl:'Plomberie'},
   {id:'meca', ic:'🚗', lbl:'Mécanique'},
@@ -324,8 +325,8 @@ function wkFormatDate(iso){
 /* ============ CHARGEMENT DES DONNÉES ============ */
 async function wkLoadAll(){
   try {
-    const [proDocs, demDocs, avisDocs, userDocs] = await Promise.all([
-      wkGetAll('professionnels'), wkGetAll('demandes'), wkGetAll('avis'), wkGetAll('utilisateurs')
+    const [proDocs, demDocs, avisDocs, userDocs, catDocs] = await Promise.all([
+      wkGetAll('professionnels'), wkGetAll('demandes'), wkGetAll('avis'), wkGetAll('utilisateurs'), wkGetAll('categories')
     ]);
     pros = proDocs;
     bookings = demDocs.sort((a,b)=>(b.id||0)-(a.id||0));
@@ -338,9 +339,16 @@ async function wkLoadAll(){
         joined: u.createdAt ? wkFormatDate(u.createdAt) : '—'
       };
     });
+    if (catDocs.length === 0) {
+      for (const c of DEMO_CATEGORIES) { await wkPut('categories', 'cat-' + c.id, c); }
+      categories = DEMO_CATEGORIES.slice();
+    } else {
+      categories = catDocs;
+    }
     wkOnline = true;
   } catch(e) {
     console.log('Walikhé admin : Firebase indisponible.', e);
+    if (!categories.length) categories = DEMO_CATEGORIES.slice();
     wkOnline = false;
   }
 }
@@ -592,7 +600,7 @@ async function toggleCertified(id){
 /* ============ SERVICES ============ */
 function renderServices(){
   document.getElementById('page').innerHTML = `
-    <div class="toolbar"><div></div><button class="btn btn-primary" onclick="alert('La gestion des catégories arrive bientôt.')">+ Ajouter une catégorie</button></div>
+    <div class="toolbar"><div></div><button class="btn btn-primary" onclick="openCategoryDrawer(null)">+ Ajouter une catégorie</button></div>
     <div class="kpi-grid" style="grid-template-columns:repeat(4,1fr);" id="services-grid"></div>
   `;
   document.getElementById('services-grid').innerHTML = categories.map(c=>{
@@ -603,11 +611,49 @@ function renderServices(){
       <div class="num" style="font-size:18px;">${c.lbl}</div>
       <div class="lbl">${count} professionnel${count>1?'s':''}</div>
       <div class="dr-actions" style="margin-top:14px;">
-        <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="alert('Modifier ${c.lbl} — bientôt disponible.')">Modifier</button>
-        <button class="btn btn-danger btn-sm" style="flex:1;" onclick="alert('Suppression de catégorie — bientôt disponible.')">Retirer</button>
+        <button class="btn btn-ghost btn-sm" style="flex:1;" onclick="openCategoryDrawer('${c.id}')">Modifier</button>
       </div>
     </div>`;
   }).join('');
+}
+function openCategoryDrawer(id){
+  const c = id ? categories.find(x=>x.id===id) : null;
+  document.getElementById('drawer-title').textContent = c ? 'Modifier la catégorie' : 'Nouvelle catégorie';
+  document.getElementById('drawer-body').innerHTML = `
+    <div class="field"><label>Icône (emoji)</label><input type="text" id="cat-ic" value="${c ? c.ic : ''}" placeholder="Ex : ⚡" maxlength="4"></div>
+    <div class="field"><label>Nom de la catégorie</label><input type="text" id="cat-lbl" value="${c ? c.lbl : ''}" placeholder="Ex : Électricité"></div>
+    ${!c ? `<div class="field"><label>Identifiant (sans espace, sans accent)</label><input type="text" id="cat-id" placeholder="Ex : jardinage"></div>` : ''}
+    <div class="dr-actions">
+      ${c ? `<button class="btn btn-danger" onclick="deleteCategoryDrawer('${c.id}')">Supprimer</button>` : ''}
+      <button class="btn btn-primary" onclick="saveCategoryDrawer(${c ? `'${c.id}'` : 'null'})">Enregistrer</button>
+    </div>
+  `;
+  openDrawer();
+}
+async function saveCategoryDrawer(existingId){
+  const ic = document.getElementById('cat-ic').value.trim() || '🛠';
+  const lbl = document.getElementById('cat-lbl').value.trim();
+  if (!lbl) { alert('Merci de donner un nom à la catégorie.'); return; }
+  let id = existingId;
+  if (!id) {
+    const raw = document.getElementById('cat-id').value.trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/(^-|-$)/g,'');
+    id = raw || ('cat' + Date.now());
+    if (categories.find(x=>x.id===id)) { alert('Cet identifiant existe déjà, choisis-en un autre.'); return; }
+  }
+  const cat = {id, ic, lbl};
+  const idx = categories.findIndex(x=>x.id===id);
+  if (idx>-1) categories[idx] = cat; else categories.push(cat);
+  closeDrawer();
+  renderServices();
+  if (wkOnline) { try { await wkPut('categories', 'cat-'+id, cat); } catch(e){ console.log(e); } }
+}
+async function deleteCategoryDrawer(id){
+  const count = pros.filter(p=>p.categorie===id).length;
+  if (count > 0 && !confirm(`${count} professionnel(s) utilisent cette catégorie. La supprimer quand même ?`)) return;
+  categories = categories.filter(x=>x.id!==id);
+  closeDrawer();
+  renderServices();
+  if (wkOnline) { try { await wkDel('categories', 'cat-'+id); } catch(e){ console.log(e); } }
 }
 
 /* ============ RÉSERVATIONS ============ */
@@ -626,12 +672,29 @@ function renderBookings(){
   const lblFor = {0:'En attente', 1:'Acceptée', 2:'En cours', 3:'Terminée', 4:'Refusée'};
   const list = bookings.filter(b => filters.bookings==='all' || b.statut===filters.bookings);
   document.getElementById('bookings-tbody').innerHTML = list.length ? list.map(b=>`
-    <tr>
+    <tr class="clickable" onclick="openBookingDrawer(${b.id})">
       <td class="cell-sub" style="font-family:var(--font-mono);">#${String(b.id).slice(-6)}</td>
       <td>${b.clientNom||'—'}</td><td>${b.proNom||'—'}</td><td>${b.service||'—'}</td><td>${wkFormatDate(b.date)}</td>
       <td style="font-family:var(--font-mono);">${b.montant ? Number(b.montant).toLocaleString('fr-FR')+' GNF' : '—'}</td>
       <td><span class="pill ${pillFor[b.statut]||'pill-amber'}">${lblFor[b.statut]||'—'}</span></td>
     </tr>`).join('') : `<tr><td colspan="7"><div class="empty">Aucune réservation dans cette catégorie.</div></td></tr>`;
+}
+function openBookingDrawer(id){
+  const b = bookings.find(x=>x.id===id); if(!b) return;
+  const lblFor = {0:'En attente', 1:'Acceptée', 2:'En cours', 3:'Terminée', 4:'Refusée'};
+  document.getElementById('drawer-title').textContent = 'Réservation #' + String(b.id).slice(-6);
+  document.getElementById('drawer-body').innerHTML = `
+    <div class="dr-field"><div class="k">Client</div>${b.clientNom||'—'} · ${b.clientTelephone||'—'}</div>
+    <div class="dr-field"><div class="k">Professionnel</div>${b.proNom||'—'}</div>
+    <div class="dr-field"><div class="k">Service</div>${b.service||'—'}</div>
+    <div class="dr-field"><div class="k">Description initiale</div>${b.description||'—'}</div>
+    <div class="dr-field"><div class="k">Adresse</div>${b.adresse||'—'}</div>
+    <div class="dr-field"><div class="k">Date souhaitée</div>${wkFormatDate(b.date)}</div>
+    <div class="dr-field"><div class="k">Statut</div><span class="pill ${b.statut===3?'pill-green':b.statut===4?'pill-red':'pill-amber'}">${lblFor[b.statut]||'—'}</span></div>
+    ${b.montant ? `<div class="dr-field"><div class="k">Montant payé</div>${Number(b.montant).toLocaleString('fr-FR')} GNF · ${b.moyenPaiement||'—'}</div>` : ''}
+    ${b.rapport ? `<div class="dr-field"><div class="k">Rapport du professionnel</div>${b.rapport}</div>` : ''}
+  `;
+  openDrawer();
 }
 function setBookingsFilter(id){ filters.bookings = id==='all' ? 'all' : Number(id); renderBookings(); }
 
@@ -673,8 +736,8 @@ function renderRevenue(){
   const panierMoyen = done.length ? Math.round(totalGlobal/done.length) : 0;
   document.getElementById('page').innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card"><div class="num">${totalGlobal.toLocaleString('fr-FR')}</div><div class="lbl">Revenus plateforme (GNF)</div></div>
-      <div class="kpi-card"><div class="num">${commission.toLocaleString('fr-FR')}</div><div class="lbl">Commission Walikhé (${wkSettings.commission||0}%)</div></div>
+      <div class="kpi-card"><div class="num">${totalGlobal.toLocaleString('fr-FR')}</div><div class="lbl">Volume total généré (GNF)</div></div>
+      <div class="kpi-card"><div class="num" style="color:var(--success);">${commission.toLocaleString('fr-FR')}</div><div class="lbl">Revenu de la plateforme (${wkSettings.commission||0}%)</div></div>
       <div class="kpi-card"><div class="num">${done.length}</div><div class="lbl">Réservations payées</div></div>
       <div class="kpi-card"><div class="num">${panierMoyen.toLocaleString('fr-FR')}</div><div class="lbl">Panier moyen (GNF)</div></div>
     </div>
