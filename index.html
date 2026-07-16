@@ -615,7 +615,7 @@ function renderBookings(){
   document.getElementById('page').innerHTML = `
     <div class="toolbar"><div class="filter-row" id="bookings-filter"></div></div>
     <div class="table-wrap"><table>
-      <thead><tr><th>Réf.</th><th>Client</th><th>Professionnel</th><th>Service</th><th>Date souhaitée</th><th>Statut</th></tr></thead>
+      <thead><tr><th>Réf.</th><th>Client</th><th>Professionnel</th><th>Service</th><th>Date souhaitée</th><th>Montant</th><th>Statut</th></tr></thead>
       <tbody id="bookings-tbody"></tbody>
     </table></div>
   `;
@@ -629,8 +629,9 @@ function renderBookings(){
     <tr>
       <td class="cell-sub" style="font-family:var(--font-mono);">#${String(b.id).slice(-6)}</td>
       <td>${b.clientNom||'—'}</td><td>${b.proNom||'—'}</td><td>${b.service||'—'}</td><td>${wkFormatDate(b.date)}</td>
+      <td style="font-family:var(--font-mono);">${b.montant ? Number(b.montant).toLocaleString('fr-FR')+' GNF' : '—'}</td>
       <td><span class="pill ${pillFor[b.statut]||'pill-amber'}">${lblFor[b.statut]||'—'}</span></td>
-    </tr>`).join('') : `<tr><td colspan="6"><div class="empty">Aucune réservation dans cette catégorie.</div></td></tr>`;
+    </tr>`).join('') : `<tr><td colspan="7"><div class="empty">Aucune réservation dans cette catégorie.</div></td></tr>`;
 }
 function setBookingsFilter(id){ filters.bookings = id==='all' ? 'all' : Number(id); renderBookings(); }
 
@@ -666,23 +667,38 @@ async function setReviewStatus(id, statut){
 
 /* ============ REVENUS ============ */
 function renderRevenue(){
-  const doneCount = bookings.filter(b=>b.statut===3).length;
+  const done = bookings.filter(b=>b.statut===3 && b.montant);
+  const totalGlobal = done.reduce((s,b)=>s+Number(b.montant||0),0);
+  const commission = Math.round(totalGlobal * (wkSettings.commission||0) / 100);
+  const panierMoyen = done.length ? Math.round(totalGlobal/done.length) : 0;
   document.getElementById('page').innerHTML = `
     <div class="kpi-grid">
-      <div class="kpi-card"><div class="num">${doneCount}</div><div class="lbl">Missions terminées (total)</div></div>
-      <div class="kpi-card"><div class="num">${bookings.filter(b=>b.statut===1||b.statut===2).length}</div><div class="lbl">En cours actuellement</div></div>
-      <div class="kpi-card"><div class="num">${bookings.filter(b=>b.statut===0).length}</div><div class="lbl">En attente d'un pro</div></div>
-      <div class="kpi-card"><div class="num">${pros.filter(p=>p.statut==='actif').length}</div><div class="lbl">Professionnels actifs</div></div>
+      <div class="kpi-card"><div class="num">${totalGlobal.toLocaleString('fr-FR')}</div><div class="lbl">Revenus plateforme (GNF)</div></div>
+      <div class="kpi-card"><div class="num">${commission.toLocaleString('fr-FR')}</div><div class="lbl">Commission Walikhé (${wkSettings.commission||0}%)</div></div>
+      <div class="kpi-card"><div class="num">${done.length}</div><div class="lbl">Réservations payées</div></div>
+      <div class="kpi-card"><div class="num">${panierMoyen.toLocaleString('fr-FR')}</div><div class="lbl">Panier moyen (GNF)</div></div>
     </div>
-    <div class="card">
-      <p style="color:var(--muted); font-size:13px;">Le suivi des montants et commissions se déclenchera dès que les professionnels renseigneront le prix de leurs interventions.</p>
+    <div class="grid-2">
+      <div class="card"><h3>Revenus par mois</h3><div class="bar-chart" id="rev-chart"></div></div>
+      <div class="card"><h3>Meilleurs professionnels</h3><div id="top-pros"></div></div>
     </div>
-    <div class="card" style="margin-top:18px;"><h3>Meilleurs professionnels</h3><div id="top-pros"></div></div>
   `;
-  const top = [...pros].filter(p=>p.statut==='actif').sort((a,b)=>(b.missions||0)-(a.missions||0)).slice(0,5);
-  document.getElementById('top-pros').innerHTML = top.length ? top.map((p,i)=>`
+  const monthsMap = {};
+  done.forEach(b=>{
+    if(!b.updatedAt) return;
+    const key = new Date(b.updatedAt).toLocaleDateString('fr-FR',{month:'short'});
+    monthsMap[key] = (monthsMap[key]||0) + Number(b.montant||0);
+  });
+  const entries = Object.entries(monthsMap);
+  const max = Math.max(1, ...entries.map(x=>x[1]));
+  document.getElementById('rev-chart').innerHTML = entries.length ? entries.map(([m,v])=>`<div class="bar-col"><div class="bar" style="height:${(v/max*100)}px;"></div><div class="lbl">${m}</div></div>`).join('') : '<div class="empty">Pas encore de données.</div>';
+
+  const revenuParPro = {};
+  done.forEach(b=>{ revenuParPro[b.proNom] = (revenuParPro[b.proNom]||0) + Number(b.montant||0); });
+  const top = Object.entries(revenuParPro).sort((a,b)=>b[1]-a[1]).slice(0,5);
+  document.getElementById('top-pros').innerHTML = top.length ? top.map(([nom,v],i)=>`
     <div class="activity-row"><div style="font-family:var(--font-mono); font-weight:600; color:var(--amber-dark); width:18px;">${i+1}</div>
-    <div style="flex:1;"><div class="cell-name">${p.nom}</div><div class="t2">${p.missions||0} missions · ★ ${p.note||'—'}</div></div></div>`).join('') : '<div class="empty">Pas encore de données.</div>';
+    <div style="flex:1;"><div class="cell-name">${nom}</div><div class="t2">${v.toLocaleString('fr-FR')} GNF générés</div></div></div>`).join('') : '<div class="empty">Pas encore de données.</div>';
 }
 
 /* ============ PARAMÈTRES ============ */
